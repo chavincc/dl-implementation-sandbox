@@ -120,7 +120,80 @@ def outputs2words(outputs: torch.Tensor) -> List[str]:
     return output_list
 
 
+class SpellingDataset(Dataset):
+    def __init__(self, csv_path):
+        self.df = pd.read_csv(csv_path)
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        return self.df.iloc[idx]["corrupted"], self.df.iloc[idx]["clean"]
+
+
+def collate_fn(batch):
+    """
+    This function takes a list of samples and turns them into
+    padded tensors using your existing utils.
+    """
+    src_batch, trg_batch = zip(*batch)
+    src_tensor = prepare_model_input(src_batch)
+    trg_tensor = prepare_model_input(trg_batch)
+    return src_tensor, trg_tensor
+
+
 # Training loop
 if __name__ == "__main__":
-    # FILL HERE
-    pass
+    dataset = SpellingDataset("data/corrupted_words.csv")
+    loader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
+
+    # Hyperparameters
+    N_EPOCHS = 5
+    lr = 3e-4
+    EMB_DIM = 64
+    HID_DIM = 64
+    N_LAYERS = 2
+
+    # Modules
+    encoder = Encoder(
+        VOCAB_SIZE, EMB_DIM, HID_DIM, n_layers=N_LAYERS, padding_idx=PADDING_IDX
+    )
+    decoder = Decoder(
+        VOCAB_SIZE, EMB_DIM, HID_DIM, n_layers=N_LAYERS, padding_idx=PADDING_IDX
+    )
+    model = Seq2SeqManager(encoder, decoder, VOCAB_SIZE)
+
+    # Optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss = torch.nn.CrossEntropyLoss(ignore_index=PADDING_IDX)
+
+    for epoch in range(N_EPOCHS):
+        epoch_loss = 0
+        model.train()
+
+        for src, trg in loader:
+            optimizer.zero_grad()
+
+            # Shape: [batch_size, trg_len, vocab_size]
+            output = model.forward(src, trg, teacher_forcing=True)
+
+            # Align output and trg shape to calculate cross entropy loss
+            # Skip the first column to avoid calculating the <SOS> score
+            output = output[:, 1:, :].reshape(-1, VOCAB_SIZE)
+            trg_loss = trg[:, 1:].reshape(-1)
+
+            l = loss(output, trg_loss)
+            l.backward()
+
+            # Clip gradients to prevent exploding gradients in RNN
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+
+            optimizer.step()
+            epoch_loss += l.item()
+
+        print(f"Epoch {epoch+1}/{N_EPOCHS} | Loss: {epoch_loss/len(loader):.4f}")
+
+    # Save weight
+    save_path = "weights/corrupted_word_model.pth"
+    torch.save(model.state_dict(), save_path)
+    print(save_path)

@@ -32,6 +32,25 @@ class ReLULayer:
 
     def backward(self, grad_output):
         return grad_output * self.mask
+    
+
+class MSELoss:
+    def __init__(self):
+        self.Y = None
+        self.Y_true = None
+        self.N = None
+
+    def __call__(self, Y, Y_true):
+        self.Y = Y
+        self.Y_true = Y_true
+        self.N = Y.shape[0]
+        loss = np.mean((Y - Y_true) ** 2)
+        return loss
+    
+    def backward(self):
+        # d(loss)/dY
+        gradient = 2*(self.Y - self.Y_true)/self.N
+        return gradient
 
 
 # -----------------------------------------------
@@ -48,6 +67,7 @@ a1 = ReLULayer()
 l2 = LinearLayer(4, 1)
 
 learning_rate = 0.01
+mseLoss = MSELoss()
 
 # 3. Dummy Training Loop
 for epoch in range(100):
@@ -57,11 +77,10 @@ for epoch in range(100):
     y_pred = l2.forward(f1)
 
     # Compute Mean Squared Error Loss
-    loss = np.mean((y_pred - y_true) ** 2)
+    loss = mseLoss(y_pred, y_true)
 
     # Backward Pass (Chain Rule)
-    # dL/dy_pred for MSE is 2/N * (y_pred - y_true)
-    grad = 2.0 * (y_pred - y_true) / y_true.shape[0]
+    grad = mseLoss.backward()
 
     grad = l2.backward(grad)
     grad = a1.backward(grad)
